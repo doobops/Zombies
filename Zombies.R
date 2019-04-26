@@ -1,13 +1,16 @@
-# I. ZOMBIES ! -----------------------------------------------------------------
+# SETUP ------------------------------------------------------------------------
 
 rm(list=ls())
 packages <- c("ggplot2", "gridExtra", "grid", "dplyr", "purrr", "MASS", "car", "pROC")
 lapply(packages, require, character.only = TRUE)
 
-# Dataset with n = 1 participant with missing zombie status
 work <- getwd
 gitpath <- paste0(work, "/GitHub/Zombies")
 
+
+# I. ZOMBIES ! -----------------------------------------------------------------
+
+# Dataset with n = 1 participant with missing zombie status
 zombies <- read.delim(file.path(gitpath, "/Zombies.txt")) %>%
   filter(zombie == "...") %>%
   dplyr::select(-water.person)
