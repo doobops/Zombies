@@ -1,7 +1,7 @@
 # I. ZOMBIES ! -----------------------------------------------------------------
 
 rm(list=ls())
-packages <- c("ggplot2", "gridExtra", "grid", "dplyr", "purrr", "MASS", "car")
+packages <- c("ggplot2", "gridExtra", "grid", "dplyr", "purrr", "MASS", "car", "pROC")
 lapply(packages, require, character.only = TRUE)
 
 # Dataset with n = 1 participant with missing zombie status
@@ -112,6 +112,7 @@ summary(mod.sparse)
 vif(mod.sparse) # No signs of multicollinearity
 avPlots(mod.sparse) # Medication and rurality show no relationship when controlled for other vars
 
+# 2. Compare models
 anova(mod.saturated, mod.reduced, mod.sparse)
 
 AIC(mod.saturated,     
@@ -123,7 +124,17 @@ BIC(mod.saturated,
     mod.sparse) #Both the minimum AIC and BIC values appear alongside the
                 #reduced model that we tested above.
 
-# 2. Check assumptions
+# 3. Assess model
+zombies$yhatZombie <- predict(mod.reduced, type = "response")
+
+zombies %>% group_by(zombie) %>% summarise(meanyhat = mean(yhatZombie)) # Human = 0.0451, Zombie = 0.955
+zombies$predZombie <- ifelse(zombies$yhatZombie > 0.9, 1, 0)
+zombies$trueZombie <- ifelse(zombies$zombie=="Zombie", 1, 0)
+
+ROC <- roc(predictor = zombies$predZombie, response = zombies$trueZombie) #AUC = 0.9333
+plot(ROC) # Excellent
+
+# 4. Check assumptions
 zombies$yhatZombie <- predict(mod.reduced)
 
 ageLinearity <- ggplot(data = zombies, aes(x = age, y = yhatZombie))+
@@ -132,7 +143,7 @@ ageLinearity <- ggplot(data = zombies, aes(x = age, y = yhatZombie))+
   geom_smooth(method = "lm", se = FALSE, color = "gray") + 
   theme_bw() 
 
-# 3. Make out-of-sample prediction
+# 5. Make out-of-sample prediction
 newdata <- data.frame(age = c(71, 20), 
                       water.person = c(5, 5),
                       food = c("Food", "Food"),
