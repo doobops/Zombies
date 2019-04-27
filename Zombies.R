@@ -1,26 +1,19 @@
 # SETUP ------------------------------------------------------------------------
 
 rm(list=ls())
-packages <- c("ggplot2", "gridExtra", "grid", "dplyr", "purrr", "MASS", "car", "pROC")
+packages <- c("ggplot2", "gridExtra", "grid", "dplyr", "purrr", "MASS", "car", "pROC", "naivebayes")
 lapply(packages, require, character.only = TRUE)
 
-work <- getwd
+work <- getwd()
 gitpath <- paste0(work, "/GitHub/Zombies")
 
 
 # I. ZOMBIES ! -----------------------------------------------------------------
 
-# Dataset with n = 1 participant with missing zombie status
-zombies <- read.delim(file.path(gitpath, "/Zombies.txt")) %>%
-  filter(zombie == "...") %>%
-  dplyr::select(-water.person)
-
-# Dataset with n = 60 participants with known zombie status
-zombies <- read.delim(file.path(gitpath, "/Zombies.txt")) %>%
-  filter(!zombie == "...") %>%
-  dplyr::select(-water.person)
-
-zombies$zombie <- droplevels(zombies$zombie)
+# Dataset with n = 200 participants with known zombie status
+zombies <- read.delim(file.path(gitpath, "/Zombies.txt")) %>% 
+  dplyr::select(-rowname) %>% 
+  dplyr::rename(zombieid = rowid.zombieid)
 
 # Create water per person feature
 zombies[, c("age", "water", "household")] <- sapply(zombies[, c("age", "water", "household")] , as.numeric)
@@ -35,7 +28,7 @@ zombies$documents[is.na(zombies$documents)] <- "No documents"
 
 # Classify features 
 vars <- names(dplyr::select(zombies, -c("zombie", "zombieid")))
-vars.numeric <- names(select_if(zombies, is.numeric))
+vars.numeric <- names(select_if(zombies[,vars], is.numeric))
 vars.discrete <- vars[!vars %in% vars.numeric]
 
     
@@ -53,7 +46,7 @@ for(i in 1:length(vars.numeric)){
   } else{
     print(paste("No significant differences in", vars.numeric[[i]], "by zombie status"))        
   }
-}
+} # Age, water, water per person
 
 # - Discrete features
 exploratory.chisq <- map(zombies[, c(vars.discrete)], ~chisq.test(., zombies[, "zombie"]))
@@ -65,7 +58,7 @@ for(i in 1:length(vars.discrete)){
   } else{
     print(paste("No significant differences in", vars.discrete[[i]], "by zombie status"))        
   }
-}
+} # Rurality, food, medication, sanitation
 
 # 2. Plot differences
 fun_hist <- function(x, y){
@@ -97,61 +90,72 @@ allplots <- do.call("grid.arrange", c(exploratory.histograms, legend, ncol = 3))
 # III. Build & Assess models----------------------------------------------------
 
 # 1. Build logit models
-mod.saturated <- glm(zombie ~ age + rurality + food + medication + firstaid + sanitation + water.person, data=zombies, family = binomial(logit))
+mod.saturated <- glm(zombie ~ age + water.person + rurality + food + medication + sanitation, data=zombies, family = binomial(logit))
 summary(mod.saturated)
 
-vif(mod.saturated) # Extremely high signs of multicollinearity
-avPlots(mod.saturated) # Medication and rurality show no relationship when controlled for other vars
+vif(mod.saturated) # No signs of multicollinearity
+avPlots(mod.saturated) # Medication and sanitation show slight signs of neutrality
 
-mod.reduced <- glm(zombie ~ age + rurality + food + medication, data=zombies, family = binomial(logit))
+mod.reduced <- glm(zombie ~ age + rurality + food, data=zombies, family = binomial(logit))
 summary(mod.reduced)
 
 vif(mod.reduced) # No signs of multicollinearity
 avPlots(mod.reduced) # Medication and rurality show no relationship when controlled for other vars
 
-mod.sparse <- glm(zombie ~ age + food, data=zombies, family = binomial(logit))
-summary(mod.sparse)
-
-vif(mod.sparse) # No signs of multicollinearity
-avPlots(mod.sparse) # Medication and rurality show no relationship when controlled for other vars
-
 # 2. Compare models
-anova(mod.saturated, mod.reduced, mod.sparse)
+anova(mod.saturated, mod.reduced)
 
 AIC(mod.saturated,     
-    mod.reduced,         
-    mod.sparse)  
+    mod.reduced) 
 
 BIC(mod.saturated,
-    mod.reduced,
-    mod.sparse) #Both the minimum AIC and BIC values appear alongside the
-                #reduced model that we tested above.
+    mod.reduced) # Both the minimum AIC and BIC values appear alongside the
+                 # full model that we tested above.
 
-# 3. Assess model
-zombies$yhatZombie <- predict(mod.reduced, type = "response")
+# 3. How sensitive / specific are our predictions ?
+zombies$yhatZombie <- predict(mod, type = "response") # Predict
 
-zombies %>% group_by(zombie) %>% summarise(meanyhat = mean(yhatZombie)) # Human = 0.0451, Zombie = 0.955
-zombies$predZombie <- ifelse(zombies$yhatZombie > 0.9, 1, 0)
-zombies$trueZombie <- ifelse(zombies$zombie=="Zombie", 1, 0)
+ggplot(data=zombies, aes(x = yhatZombie, fill=zombie)) + 
+  geom_histogram() # Plot likelihood against zombie status. 
+                   # See pretty good differentiation
 
-ROC <- roc(predictor = zombies$predZombie, response = zombies$trueZombie) #AUC = 0.9333
-plot(ROC) # Excellent
+zombies %>% 
+  group_by(zombie) %>% 
+  summarise(meanyhat = mean(yhatZombie)) # Mean likelihood by zombie status: Human = 0.0451, Zombie = 0.955
+                                         # Too specific to rely on as likelihood threshold
 
-# 4. Check assumptions
-zombies$yhatZombie <- predict(mod.reduced)
+threshold <- 0.75  # Likelihood threshold for predicting zombie status
+zombies$predZombie <- ifelse(zombies$yhatZombie > threshold, 1, 0) 
+zombies$trueZombie <- ifelse(zombies$zombie=="Zombie", 1, 0) 
 
-ageLinearity <- ggplot(data = zombies, aes(x = age, y = yhatZombie))+
-  geom_point(color = "gray") +
-  geom_smooth(method = "loess", se = FALSE, color = "orange") + 
-  geom_smooth(method = "lm", se = FALSE, color = "gray") + 
-  theme_bw() 
+ROC <- roc(predictor = zombies$predZombie, response = zombies$trueZombie) # How specific / sensitive ?
+ROC  # AUC = 0.7515
+plot(ROC) # Good
 
-# 5. Make out-of-sample prediction
+mean(zombies$predZombie == zombies$trueZombie) # 79.5% accuracy rate
+
+# 4. Make out-of-sample prediction
 newdata <- data.frame(age = c(71, 20), 
-                      water.person = c(5, 5),
+                      water.person = cd(5, 5),
                       food = c("Food", "Food"),
                       rurality = c("Suburban", "Rural"),
                       medication = c("Medication", "Medication"),
-                      sanitation = c("Sanitation", "Sanitation"))
+                      sanitation = c("Sanitation", "Sanitation")) # Create rando dataset
 
-predict(mod.reduced, newdata, type="response") # Young and old made all the difference
+predict(mod.reduced, newdata, type="response") 
+
+
+# Naive Bayes ------------------------------------------------------------------
+
+mod.nb <- naive_bayes(zombie ~ age + rurality + food + medication, data = zombies)
+
+newdata <- data.frame(age = c(71, 21),
+                      food = factor(c("No food", "No food")),
+                      rurality = factor(c("Rural", "Suburban")),
+                      medication = factor(c("Medication", "No medication")))
+
+levels(newdata$food) <- c("Food", "No food")
+levels(newdata$rurality) <- c("Rural", "Suburban", "Urban")
+levels(newdata$medication) <- c("Medication", "No medication")
+
+predict(mod.nb, newdata)
