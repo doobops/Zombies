@@ -113,7 +113,7 @@ BIC(mod.saturated,
                  # full model that we tested above.
 
 # 3. How sensitive / specific are our predictions ?
-zombies$yhatZombie <- predict(mod, type = "response") # Predict
+zombies$yhatZombie <- predict(mod.saturated, type = "response") # Predict
 
 ggplot(data=zombies, aes(x = yhatZombie, fill=zombie)) + 
   geom_histogram() # Plot likelihood against zombie status. 
@@ -124,7 +124,7 @@ zombies %>%
   summarise(meanyhat = mean(yhatZombie)) # Mean likelihood by zombie status: Human = 0.0451, Zombie = 0.955
                                          # Too specific to rely on as likelihood threshold
 
-threshold <- 0.75  # Likelihood threshold for predicting zombie status
+threshold <- 0.25 # Likelihood threshold for predicting zombie status
 zombies$predZombie <- ifelse(zombies$yhatZombie > threshold, 1, 0) 
 zombies$trueZombie <- ifelse(zombies$zombie=="Zombie", 1, 0) 
 
